@@ -25,16 +25,16 @@ def test_init():
     assert wm.code_template == CODE_TEMPLATE
     actions = wm.actions()
     assert len(actions) == 5
-    assert actions[0]['name'] == 'run'
-    assert actions[0]['handler'] == wm.run_toggle
-    assert actions[1]['name'] == 'browse'
-    assert actions[1]['handler'] == wm.browse
-    assert actions[2]['name'] == 'views'
-    assert actions[2]['handler'] == wm.load_views
-    assert actions[3]['name'] == 'css'
-    assert actions[3]['handler'] == wm.load_css
-    assert actions[4]['name'] == 'static'
-    assert actions[4]['handler'] == wm.show_images
+    assert actions[0]["name"] == "run"
+    assert actions[0]["handler"] == wm.run_toggle
+    assert actions[1]["name"] == "browse"
+    assert actions[1]["handler"] == wm.browse
+    assert actions[2]["name"] == "templates"
+    assert actions[2]["handler"] == wm.load_templates
+    assert actions[3]["name"] == "css"
+    assert actions[3]["handler"] == wm.load_css
+    assert actions[4]["name"] == "static"
+    assert actions[4]["handler"] == wm.show_images
 
 
 def test_web_api():
@@ -48,7 +48,7 @@ def test_web_api():
     assert result == SHARED_APIS + PYTHON3_APIS + FLASK_APIS
 
 
-def test_run_toggle_on():
+def test_run_toggle_on(qtapp):
     """
     Check the handler for running the local server starts the sub-process and
     updates the UI state.
@@ -65,14 +65,14 @@ def test_run_toggle_on():
     wm.set_buttons = mock.MagicMock()
     wm.run_toggle(None)
     wm.start_server.assert_called_once_with()
-    slot = wm.view.button_bar.slots['run']
+    slot = wm.view.button_bar.slots["run"]
     assert slot.setIcon.call_count == 1
-    slot.setText.assert_called_once_with('Stop')
-    slot.setToolTip.assert_called_once_with('Stop the web server.')
+    slot.setText.assert_called_once_with("Stop")
+    slot.setToolTip.assert_called_once_with("Stop the web server.")
     wm.set_buttons.assert_called_once_with(modes=False)
 
 
-def test_run_toggle_off():
+def test_run_toggle_off(qtapp):
     """
     Check the handler for toggling the local server stops the process and
     reverts the UI state.
@@ -85,10 +85,10 @@ def test_run_toggle_off():
     wm.set_buttons = mock.MagicMock()
     wm.run_toggle(None)
     wm.stop_server.assert_called_once_with()
-    slot = wm.view.button_bar.slots['play']
+    slot = wm.view.button_bar.slots["play"]
     assert slot.setIcon.call_count == 1
-    slot.setText.assert_called_once_with('Run')
-    slot.setToolTip.assert_called_once_with('Run the web server.')
+    slot.setText.assert_called_once_with("Run")
+    slot.setToolTip.assert_called_once_with("Run the web server.")
     wm.set_buttons.assert_called_once_with(modes=True)
 
 
@@ -171,6 +171,28 @@ def test_stop_server():
     view.remove_python_runner.assert_called_once_with()
 
 
+def test_stop_server_with_error():
+    """
+    If killing the server's child process encounters a problem (perhaps the
+    process is already dead), then log this and tidy up.
+    """
+    editor = mock.MagicMock()
+    view = mock.MagicMock()
+    wm = WebMode(editor, view)
+    mock_runner = mock.MagicMock()
+    mock_runner.process.processId.return_value = 666  # ;-)
+    wm.runner = mock_runner
+    with mock.patch(
+        "os.kill", side_effect=Exception("Bang")
+    ) as mock_kill, mock.patch("mu.modes.web.logger.error") as mock_log:
+        wm.stop_server()
+        mock_kill.assert_called_once_with(666, signal.SIGINT)
+        assert mock_log.call_count == 2
+    mock_runner.process.waitForFinished.assert_called_once_with()
+    assert wm.runner is None
+    view.remove_python_runner.assert_called_once_with()
+
+
 def test_stop():
     """
     Ensure that this method, called when Mu is quitting, stops the local
@@ -193,15 +215,16 @@ def test_open_file():
     editor = mock.MagicMock()
     view = mock.MagicMock()
     wm = WebMode(editor, view)
-    with mock.patch("mu.modes.web.read_and_decode",
-                    return_value=("foo", "\n")) as m:
+    with mock.patch(
+        "mu.modes.web.read_and_decode", return_value=("foo", "\n")
+    ) as m:
         text, newline = wm.open_file("file.html")
         m.assert_called_once_with("file.html")
         assert text == "foo"
         assert newline == "\n"
 
 
-def test_load_views():
+def test_load_templates():
     """
     The OS's file system explorer is opened in the correct location for the
     templates / views used by the web application.
@@ -209,8 +232,23 @@ def test_load_views():
     editor = mock.MagicMock()
     view = mock.MagicMock()
     wm = WebMode(editor, view)
-    wm.load_views(None)
-    expected_path = os.path.join(wm.workspace_dir(), 'templates')
+    view.current_tab.path = os.path.join(wm.workspace_dir(), "foo.py")
+    wm.load_templates(None)
+    expected_path = os.path.join(wm.workspace_dir(), "templates")
+    editor.load.assert_called_once_with(default_path=expected_path)
+
+
+def test_load_templates_no_file():
+    """
+    The OS's file system explorer is opened in the correct location for the
+    templates / views used by the web application.
+    """
+    editor = mock.MagicMock()
+    view = mock.MagicMock()
+    view.current_tab = None
+    wm = WebMode(editor, view)
+    wm.load_templates(None)
+    expected_path = os.path.join(wm.workspace_dir(), "templates")
     editor.load.assert_called_once_with(default_path=expected_path)
 
 
@@ -222,8 +260,23 @@ def test_load_css():
     editor = mock.MagicMock()
     view = mock.MagicMock()
     wm = WebMode(editor, view)
+    view.current_tab.path = os.path.join(wm.workspace_dir(), "foo.py")
     wm.load_css(None)
-    expected_path = os.path.join(wm.workspace_dir(), 'static', 'css')
+    expected_path = os.path.join(wm.workspace_dir(), "static", "css")
+    editor.load.assert_called_once_with(default_path=expected_path)
+
+
+def test_load_css_no_file():
+    """
+    The OS's file system explorer is opened in the correct location for the
+    web application's CSS files.
+    """
+    editor = mock.MagicMock()
+    view = mock.MagicMock()
+    view.current_tab = None
+    wm = WebMode(editor, view)
+    wm.load_css(None)
+    expected_path = os.path.join(wm.workspace_dir(), "static", "css")
     editor.load.assert_called_once_with(default_path=expected_path)
 
 
@@ -235,8 +288,23 @@ def test_show_images():
     editor = mock.MagicMock()
     view = mock.MagicMock()
     wm = WebMode(editor, view)
+    view.current_tab.path = os.path.join(wm.workspace_dir(), "foo.py")
     wm.show_images(None)
-    expected_path = os.path.join(wm.workspace_dir(), 'static', 'img')
+    expected_path = os.path.join(wm.workspace_dir(), "static", "img")
+    view.open_directory_from_os.assert_called_once_with(expected_path)
+
+
+def test_show_images_no_file():
+    """
+    The OS's file system explorer is opened in the correct location for the
+    web application's CSS files.
+    """
+    editor = mock.MagicMock()
+    view = mock.MagicMock()
+    view.current_tab = None
+    wm = WebMode(editor, view)
+    wm.show_images(None)
+    expected_path = os.path.join(wm.workspace_dir(), "static", "img")
     view.open_directory_from_os.assert_called_once_with(expected_path)
 
 
